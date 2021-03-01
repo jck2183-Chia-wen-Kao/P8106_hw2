@@ -1,0 +1,111 @@
+---
+title: "P8106_hw2"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret) 
+library(splines)
+library(mgcv)
+library(pdp)
+library(earth)
+library(tidyverse)
+library(ggplot2)
+```
+
+```{r, cache=TRUE}
+hw2_df = read.csv("./data/college.csv") 
+hw2_df = hw2_df %>% select(-College) %>% na.omit()
+
+x = model.matrix(Outstate~.,hw2_df)[,-1]
+y = hw2_df$Outstate
+hw2_df %>% select(-Outstate) %>%  summary()
+
+```
+### a) Perform exploratory data analysis (e.g., scatter plots of response vs. predictors).
+```{r, fig.height=4, cache=TRUE}
+theme1 = trellis.par.get()
+theme1$plot.symbol$col = rgb(.2, .4, .2, .5)
+theme1$plot.symbol$pch = 16
+theme1$plot.line$col = rgb(.8, .1, .1, 1)
+theme1$plot.line$lwd = 2
+theme1$strip.background$col = rgb(.0, .2, .6, .2)
+trellis.par.set(theme1)
+featurePlot(x, y, plot = "scatter", labels = c("","Y"),
+            type = c("p"), layout = c(6, 3))
+```
+
+
+### b) Fit `smoothing spline` models using Terminal as the only predictor of Outstate for a range of degrees of freedom, as well as the degree of freedom obtained by generalized cross-validation, and plot the resulting fits. Describe the results obtained.
+
+```{r, cache=TRUE}
+set.seed(100)
+fit_ss = smooth.spline(hw2_df$Terminal, hw2_df$Outstate)
+
+terminal_lims <- range(hw2_df$Terminal)
+terminal_grid <- seq(from = terminal_lims[1],to = terminal_lims[2])
+
+fit_ss$df
+
+pred_ss = predict(fit_ss,
+                   x = terminal_grid)
+
+pred_ss_df = data.frame(pred = pred_ss$y,
+                         Terminal = terminal_grid)
+
+p <- ggplot(data = hw2_df, aes(x = Terminal, y = Outstate)) +
+     geom_point(color = rgb(.2, .4, .2, .5))
+
+p +
+geom_line(aes(x = Terminal, y = pred), data = pred_ss_df,
+          color = rgb(.8, .1, .1, 1)) + theme_bw()
+```
+From the result, we can see that when the percentage of faculty with a terminal degree is over 70, the out-of-state tuition would have a significant rise.
+
+### c) Fit a generalized additive model (GAM) using all the predictors. Plot the results and explain your findings.
+
+
+```{r, cache=TRUE, results = FALSE}
+ctrl1 <- trainControl(method = "cv", number = 10)
+
+
+set.seed(100)
+gam.fit <- train(x, y,
+                 method = "gam",
+                 tuneGrid = data.frame(method = "GCV.Cp", 
+                                       select = TRUE),
+                 trControl = ctrl1)
+
+gam.fit$bestTune
+
+gam.fit$finalModel
+
+plot(gam.fit$finalModel)
+```
+From the result, we can see predictors `perc.alumni`,`Terminal`, `Top25perc`, `Personal`, `P.Undergrad` are near-linearity, while predictors `Top10perc`, `PhD`, `Grad.rate`, `Books`, `S.F.Ratio`, `Enroll`, `Room.Board`, `Accept`, `F.Undergrad`, `Apps`, and `Expend` are non-linearity. Among the non-linearity variables, predictors tend to have higher variance qt the outer range/boundary.
+
+### d) Train a multivariate adaptive regression spline (MARS) model using all the predictors. Report the final model. Present the partial dependence plot of an arbitrary predictor in your final model.
+```{r, cache=TRUE}
+mars_grid <- expand.grid(degree = 1:3, 
+                         nprune = 2:25)
+
+set.seed(100)
+mars.fit <- train(x, y,
+                  method = "earth",
+                  tuneGrid = mars_grid,
+                  trControl = ctrl1)
+
+ggplot(mars.fit)
+
+mars.fit$bestTune
+
+coef(mars.fit$finalModel) 
+```
+
+```{r, cache=TRUE}
+mars.fit %>% pdp::partial(pred.var = "Personal") %>%
+  autoplot(smooth = TRUE, ylab = expression(f(Personal))) +
+  theme_light() 
+```
+
